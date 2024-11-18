@@ -1,0 +1,112 @@
+#include <WiFi.h>
+#include <Servo.h>
+#include <NewPing.h>
+
+// Konfigurasi Wi-Fi
+const char* ssid = "your_SSID";
+const char* password = "your_PASSWORD";
+
+// Definisi pin
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define MAX_DISTANCE 200 // Maksimum jarak dalam cm
+
+#define SENSOR_INDUKTIF_PIN 19
+#define SENSOR_KAPASITIF_PIN 21
+#define SENSOR_IR_PIN 22
+
+#define SERVO_PIN 23
+
+// Inisialisasi objek
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
+Servo servoMotor;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Inisialisasi Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("Connected!");
+
+  // Inisialisasi pin
+  pinMode(SENSOR_INDUKTIF_PIN, INPUT);
+  pinMode(SENSOR_KAPASITIF_PIN, INPUT);
+  pinMode(SENSOR_IR_PIN, INPUT);
+
+  servoMotor.attach(SERVO_PIN);
+  servoMotor.write(90); // Posisi awal (netral)
+}
+
+void loop() {
+  // Deteksi keberadaan sampah dengan sensor ultrasonik
+  delay(50); // Waktu tunda antara pembacaan
+  unsigned int distance = sonar.ping_cm();
+
+  if (distance > 0 && distance < 20) { // Jika ada objek dalam jarak 20 cm
+    Serial.println("Sampah terdeteksi, memulai klasifikasi...");
+
+    // Membaca sensor induktif
+    bool isMetal = digitalRead(SENSOR_INDUKTIF_PIN);
+    // Membaca sensor kapasitif
+    bool isPlastic = digitalRead(SENSOR_KAPASITIF_PIN);
+    // Membaca sensor inframerah
+    bool isOrganic = digitalRead(SENSOR_IR_PIN);
+
+    if (isMetal) {
+      Serial.println("Jenis Sampah: Logam");
+      // Gerakkan servo ke posisi untuk logam
+      servoMotor.write(0);
+      // Kirim data ke cloud
+      sendDataToCloud("{\"type\":\"metal\"}");
+    } else if (isPlastic) {
+      Serial.println("Jenis Sampah: Plastik");
+      // Gerakkan servo ke posisi untuk plastik
+      servoMotor.write(45);
+      sendDataToCloud("{\"type\":\"plastic\"}");
+    } else if (isOrganic) {
+      Serial.println("Jenis Sampah: Organik");
+      // Gerakkan servo ke posisi untuk organik
+      servoMotor.write(135);
+      sendDataToCloud("{\"type\":\"organic\"}");
+    } else {
+      Serial.println("Jenis Sampah: Tidak Dikenali");
+      // Posisi default
+      servoMotor.write(90);
+      sendDataToCloud("{\"type\":\"unknown\"}");
+    }
+
+    delay(2000); // Tunggu agar sampah jatuh ke wadah
+    servoMotor.write(90); // Kembalikan servo ke posisi awal
+  }
+}
+
+void sendDataToCloud(String data) {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    HTTPClient http;
+
+    http.begin(client, "http://your_cloud_endpoint.com/data");
+    http.addHeader("Content-Type", "application/json");
+
+    int httpResponseCode = http.POST(data);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+      Serial.println("Response: " + response);
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
